@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin - BarberKing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf-autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { background-color: #030712; color: #f3f4f6; font-family: sans-serif; }
+        .glass { background: rgba(17, 24, 39, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body class="p-4 md:p-12">
+    <div class="max-w-6xl mx-auto">
+        <header class="flex justify-between items-center mb-8 border-b border-white/5 pb-6">
+            <h1 class="text-2xl font-bold">PAINEL <span class="text-amber-500">ADMINISTRADOR</span></h1>
+            <div id="login-section" class="flex gap-2">
+                <input type="password" id="pass" placeholder="Senha" class="bg-white/5 border border-white/10 rounded px-3 py-2 outline-none">
+                <button onclick="login()" class="bg-amber-500 text-black px-4 py-2 rounded font-bold">Entrar</button>
+            </div>
+            <button id="logout-btn" onclick="location.reload()" class="hidden text-red-400 border border-red-400/30 px-4 py-1 rounded">Sair</button>
+        </header>
+
+        <div id="main-admin" class="hidden space-y-8">
+            <section class="glass p-6 rounded-xl">
+                <h3 class="text-amber-500 font-bold text-sm mb-4 uppercase">Bloquear Horário / Folga</h3>
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                    <input type="date" id="off-date" class="bg-gray-900 border border-white/10 p-2 rounded">
+                    <select id="off-barber" class="bg-gray-900 border border-white/10 p-2 rounded">
+                        <option value="all">Todos</option><option value="Mayco">Mayco</option><option value="Chiquinho">Chiquinho</option><option value="Erick">Erick</option>
+                    </select>
+                    <input type="time" id="off-start" class="bg-gray-900 border border-white/10 p-2 rounded">
+                    <input type="time" id="off-end" class="bg-gray-900 border border-white/10 p-2 rounded">
+                    <button onclick="addOff()" class="bg-amber-500 text-black font-bold rounded">Bloquear</button>
+                </div>
+                <div id="off-list" class="mt-4 flex flex-wrap gap-2"></div>
+            </section>
+
+            <div class="glass rounded-xl overflow-hidden">
+                <div class="p-4 bg-white/5 flex justify-between items-center">
+                    <h3 class="font-bold">Agendamentos Ativos</h3>
+                    <div class="flex gap-2">
+                        <button onclick="exportCSV()" class="text-xs border border-amber-500/50 px-2 py-1 rounded">Excel</button>
+                        <button onclick="exportPDF()" class="text-xs border border-red-500/50 px-2 py-1 rounded">PDF</button>
+                    </div>
+                </div>
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-white/5 text-gray-400">
+                        <tr><th class="p-4">Data/Hora</th><th class="p-4">Cliente</th><th class="p-4">Serviço</th><th class="p-4">Ação</th></tr>
+                    </thead>
+                    <tbody id="app-table"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // CONFIGURAÇÃO SUPABASE
+        const SUPABASE_URL = 'https://emopambwmcibravshkab.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_rcW6Kr537s9_xFTuTlzGiQ_JGMQM2Bo';
+        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        const PASS = 'admin123';
+
+        async function login() {
+            if(document.getElementById('pass').value === PASS) {
+                document.getElementById('login-section').classList.add('hidden');
+                document.getElementById('logout-btn').classList.remove('hidden');
+                document.getElementById('main-admin').classList.remove('hidden');
+                render(); renderOffs();
+            } else { alert('Senha incorreta!'); }
+        }
+
+        async function render() {
+            // Busca dados do Supabase em vez do LocalStorage
+            const { data: apps, error } = await _supabase.from('appointments').select('*').order('date', { ascending: true });
+            if (error) return console.error(error);
+
+            document.getElementById('app-table').innerHTML = apps.map(a => `
+                <tr class="border-t border-white/5">
+                    <td class="p-4 text-amber-500">${a.date.split('-').reverse().join('/')} | ${a.time}</td>
+                    <td class="p-4">${a.clientName} (${a.professionalId})</td>
+                    <td class="p-4 text-gray-400">${a.serviceId}</td>
+                    <td class="p-4"><button onclick="cancel('${a.id}')" class="text-red-500 underline">Cancelar</button></td>
+                </tr>`).join('');
+        }
+
+        async function cancel(id) {
+            if(confirm('Tem certeza que deseja excluir este agendamento?')) {
+                const { error } = await _supabase.from('appointments').delete().eq('id', id);
+                if (error) {
+                    alert('Erro ao cancelar. Verifique as Policies (RLS) no Supabase.');
+                } else {
+                    render();
+                }
+            }
+        }
+
+        async function addOff() {
+    const date = document.getElementById('off-date').value;
+    if(!date) return alert('Selecione uma data!');
+
+    const { error } = await _supabase.from('off_dates').insert([{ 
+        date: date, 
+        barber: document.getElementById('off-barber').value, 
+        start_time: document.getElementById('off-start').value, 
+        end_time: document.getElementById('off-end').value 
+    }]);
+
+    if (error) {
+        alert('Erro ao bloquear: ' + error.message);
+    } else {
+        alert('Bloqueado com sucesso!');
+        renderOffs();
+    }
+}
+
+        async function renderOffs() {
+            const { data: offs } = await _supabase.from('off_dates').select('*');
+            document.getElementById('off-list').innerHTML = (offs || []).map(o => `
+                <span class="bg-red-900/30 text-red-200 px-3 py-1 rounded-full text-xs">
+                    ${o.date} (${o.barber}) <button onclick="delOff('${o.id}')">×</button>
+                </span>`).join('');
+        }
+
+        async function delOff(id) {
+            await _supabase.from('off_dates').delete().eq('id', id);
+            renderOffs();
+        }
+
+        async function exportCSV() {
+            const { data: apps } = await _supabase.from('appointments').select('*');
+            let csv = 'Data;Hora;Cliente;Barbeiro\n';
+            apps.forEach(a => csv += `${a.date};${a.time};${a.clientName};${a.professionalId}\n`);
+            const blob = new Blob([csv], {type: 'text/csv'});
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'relatorio.csv'; a.click();
+        }
+
+        async function exportPDF() {
+            const { data: apps } = await _supabase.from('appointments').select('*');
+            const doc = new jspdf.jsPDF();
+            doc.text("Relatorio de Agendamentos", 10, 10);
+            const rows = apps.map(a => [a.date, a.time, a.clientName, a.professionalId]);
+            doc.autoTable({ head: [['Data', 'Hora', 'Cliente', 'Barbeiro']], body: rows });
+            doc.save('relatorio.pdf');
+        }
+    </script>
+</body>
+</html>
